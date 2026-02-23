@@ -5,6 +5,7 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 import seaborn as sns
+import shap
 
 # Set page configuration
 st.set_page_config(
@@ -99,14 +100,20 @@ st.markdown(f"""
 # Load artifacts
 @st.cache_resource
 def load_model_artifacts():
-    # Adjust paths if needed - assuming running from root
-    base_path = "model/model_files/"
+    # Detect path relative to the script location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    base_path = os.path.join(script_dir, "model", "model_files")
+    
     model = joblib.load(os.path.join(base_path, "heloc_random_forest_model.pkl"))
     scaler = joblib.load(os.path.join(base_path, "scaler.pkl"))
     features = joblib.load(os.path.join(base_path, "feature_order.pkl"))
     info = joblib.load(os.path.join(base_path, "preprocessing_info.pkl"))
     config = joblib.load(os.path.join(base_path, "model_config.pkl"))
     return model, scaler, features, info, config
+
+@st.cache_resource
+def get_shap_explainer(_model):
+    return shap.TreeExplainer(_model)
 
 try:
     model, scaler, feature_names, info, config = load_model_artifacts()
@@ -219,88 +226,88 @@ if predict_btn or 'prediction_done' in st.session_state:
             </div>
         """, unsafe_allow_html=True)
 
-    # Explanation Section
+    # Explanation Section (SHAP)
     st.markdown("---")
     col_exp1, col_exp2 = st.columns(2)
     
-    with col_exp1:
-        st.subheader("Decision Factors")
-        
-        # Calculate local drivers: (User Scaled - Median Scaled) * Global Importance
-        # This highlights why this specific prediction differs from the median observation
-        X_median = pd.DataFrame([medians])[feature_names]
-        X_median_scaled = scaler.transform(X_median)
-        
-        importances = model.feature_importances_
-        diff = (X_scaled - X_median_scaled).ravel()
-        influence = diff * importances
-        
-        local_drivers = pd.Series(influence, index=feature_names)
-        top_drivers = local_drivers.abs().sort_values(ascending=False).head(5)
-        top_drivers_signed = local_drivers.loc[top_drivers.index]
-        
-        if top_drivers.sum() == 0:
-            st.write("Applicant profile perfectly matches the median. Displaying Global Factors:")
-            plot_data = pd.Series(importances, index=feature_names).sort_values(ascending=False).head(5)
-            title = "Top Global Model Factors"
+    # Calculate SHAP values
+    explainer = get_shap_explainer(model)
+    shap_values = explainer.shap_values(X_scaled)
+    
+    # Handle SHAP output format
+    if isinstance(shap_values, list):
+        # Class 1 is "Bad"
+        local_shap_bad = shap_values[1][0]
+    else:
+        if len(shap_values.shape) == 3: # (num_samples, num_features, num_classes)
+            local_shap_bad = shap_values[0, :, 1]
         else:
-            plot_data = top_drivers_signed
-            title = "Local Impact (Relative to Median)"
+            local_shap_bad = shap_values[0][0:len(feature_names)]
 
-        fig, ax = plt.subplots(figsize=(8, 6))
-        # Use simple color logic for impact
-        colors = [ACCENT_BLUE if x > 0 else PRIMARY_NAVY for x in plot_data.values]
-        sns.barplot(x=plot_data.values, y=plot_data.index, palette=colors, ax=ax)
-        ax.set_title(title)
+    # Create explanation dataframe
+    explanation_df = pd.DataFrame({
+        'Feature': feature_names,
+        'Value': input_df.iloc[0].values,
+        'SHAP_Impact': local_shap_bad
+    }).sort_values('SHAP_Impact', key=abs, ascending=False)
+
+    with col_exp1:
+        st.subheader("Decision Factors (SHAP)")
+        
+        # Take top 10 most impactful features for the plot
+        top_10 = explanation_df.head(10).copy()
+        top_10['Impact_Pct'] = top_10['SHAP_Impact'] * 100
+        # Use full labels from feature_meta
+        top_10['Label'] = top_10.apply(lambda row: f"{feature_meta.get(row['Feature'], {'label': row['Feature']})['label']}", axis=1)
+        top_10 = top_10.sort_values('Impact_Pct', ascending=True)
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        fig.patch.set_facecolor('black')
+        ax.set_facecolor('#1e1e1e')
+        
+        colors = ['#ff4b4b' if x > 0 else '#00ff00' for x in top_10['Impact_Pct']]
+        ax.barh(range(len(top_10)), top_10['Impact_Pct'], color=colors, alpha=0.8)
+        
+        ax.set_yticks(range(len(top_10)))
+        ax.set_yticklabels(top_10['Label'], color=ACCENT_GOLD, fontsize=10)
+        ax.set_xlabel('Risk Contribution (%)', color=ACCENT_GOLD, fontsize=12)
+        ax.set_title(f'Risk Impact (Total: {proba:.0%})', color=PRIMARY_YELLOW, fontsize=14, fontweight='bold')
+        
+        for spine in ax.spines.values():
+            spine.set_color(ACCENT_GOLD)
+        ax.tick_params(colors=ACCENT_GOLD)
+        
+        ax.axvline(x=0, color='white', linewidth=1, linestyle='-', alpha=0.3)
         plt.tight_layout()
         st.pyplot(fig)
 
     with col_exp2:
         st.subheader("Improvement Suggestions")
         if is_denied:
-            st.write("To improve eligibility in the future, the applicant should focus on the following:")
+            st.write("Focusing on these areas would most effectively lower the predicted risk profile:")
             
-            # Simple heuristic suggestions based on importance and sign
-            # ExternalRiskEstimate: Higher is better
-            # NetFractionRevolvingBurden: Lower is better
-            # NumInqLast6M: Lower is better
-            # PercentTradesNeverDelq: Higher is better
+            # Suggest based on top 3 positive SHAP values (factors that increased risk)
+            positive_impacts = explanation_df[explanation_df['SHAP_Impact'] > 0].head(3)
             
-            suggestions = []
-            
-            # Top features that pushed them towards denial
-            if top_drivers.sum() == 0:
-                st.write("- The applicant has a perfectly 'average' profile based on historical medians.")
-            else:
-                for feat in top_drivers.index[:3]:
-                    influence_val = local_drivers[feat]
+            if not positive_impacts.empty:
+                for _, row in positive_impacts.iterrows():
+                    feat = row['Feature']
+                    label = feature_meta.get(feat, {'label': feat})['label']
                     
-                    # Positive influence means it increased P(Bad), so suggest reversing direction
-                    if influence_val > 0:
-                        if feat == 'ExternalRiskEstimate':
-                             suggestions.append(f"**{feature_meta[feat]['label']}**: Increasing this factor would improve eligibility.")
-                        elif 'Burden' in feat or 'Inq' in feat or 'Delq' in feat:
-                             suggestions.append(f"**{feature_meta[feat]['label']}**: Decreasing this factor would improve eligibility.")
-                        else:
-                             # Heuristic for others: if positive influence, suggest the opposite of current vs median
-                             user_val = input_data[feat]
-                             median_val = medians.get(feat, 0)
-                             if user_val > median_val:
-                                 suggestions.append(f"**{feature_meta[feat]['label']}**: Decreasing this factor would improve eligibility.")
-                             else:
-                                 suggestions.append(f"**{feature_meta[feat]['label']}**: Increasing this factor would improve eligibility.")
-                
-                if not suggestions:
-                    suggestions.append("Address the primary risk factors identified in the chart to improve eligibility.")
-                
-                for s in suggestions:
-                    st.info(s)
+                    if 'Burden' in feat or 'Inq' in feat or 'Delq' in feat:
+                        st.info(f"**{label}**: Decreasing this factor would improve eligibility.")
+                    else:
+                        st.info(f"**{label}**: Increasing this factor would improve eligibility.")
+            else:
+                st.info("Improve overall credit health by optimizing the factors shown in the chart.")
         else:
-            st.success("The application demonstrates strong credit indicators compared to historical data.")
-            st.write("Common strengths observed in this profile:")
-            st.write("- Low dependency on credit lines")
-            st.write("- Long trade history")
-            st.write("- Strong external risk estimates")
+            st.success("The application demonstrates strong credit indicators.")
+            st.write("Key strengths contributing to your approval:")
+            # Show factors with negative SHAP (decreased risk)
+            negative_impacts = explanation_df[explanation_df['SHAP_Impact'] < 0].head(3)
+            for _, row in negative_impacts.iterrows():
+                label = feature_meta.get(row['Feature'], {'label': row['Feature']})['label']
+                st.write(f"✓ Strong performance in **{label}**")
 
 else:
     # Welcome Screen
