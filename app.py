@@ -100,7 +100,7 @@ st.markdown(f"""
 @st.cache_resource
 def load_model_artifacts():
     # Adjust paths if needed - assuming running from root
-    base_path = "/model/model_files/"
+    base_path = "model/model_files/"
     model = joblib.load(os.path.join(base_path, "heloc_random_forest_model.pkl"))
     scaler = joblib.load(os.path.join(base_path, "scaler.pkl"))
     features = joblib.load(os.path.join(base_path, "feature_order.pkl"))
