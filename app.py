@@ -77,11 +77,17 @@ st.markdown(f"""
         background-color: {SOFT_SKY};
         color: {PRIMARY_NAVY};
         border-left: 10px solid {ACCENT_BLUE};
+        h2 {{
+            color: {PRIMARY_NAVY} !important;
+        }}
     }}
     .negative {{
         background-color: {SOFT_BUTTER};
         color: #7d6608;
         border-left: 10px solid {ACCENT_GOLD};
+        h2 {{
+            color: {PRIMARY_NAVY} !important;
+        }}
     }}
     /* Expander styling */
     .streamlit-expanderHeader {{
@@ -102,7 +108,7 @@ st.markdown(f"""
 def load_model_artifacts():
     # Detect path relative to the script location
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    base_path = os.path.join(script_dir, "model", "model_files")
+    base_path = os.path.join(script_dir, "model")
     
     model = joblib.load(os.path.join(base_path, "heloc_random_forest_model.pkl"))
     scaler = joblib.load(os.path.join(base_path, "scaler.pkl"))
@@ -124,30 +130,60 @@ except Exception as e:
     st.stop()
 
 # Feature metadata for the UI
+# Exactly the 20 features the model was trained on, in model order
 feature_meta = {
-    'ExternalRiskEstimate': {'min': 0, 'max': 100, 'label': 'External Risk Estimate (High = Better)'},
-    'MSinceOldestTradeOpen': {'min': 0, 'max': 1000, 'label': 'Months Since Oldest Trade Open'},
-    'MSinceMostRecentTradeOpen': {'min': 0, 'max': 1000, 'label': 'Months Since Most Recent Trade Open'},
-    'AverageMInFile': {'min': 0, 'max': 1000, 'label': 'Average Months in File'},
-    'NumSatisfactoryTrades': {'min': 0, 'max': 100, 'label': 'Number of Satisfactory Trades'},
-    'NumTrades60Ever2DerogPubRec': {'min': 0, 'max': 20, 'label': 'Trades 60+ Days Delinquent'},
-    'NumTrades90Ever2DerogPubRec': {'min': 0, 'max': 20, 'label': 'Trades 90+ Days Delinquent'},
-    'PercentTradesNeverDelq': {'min': 0, 'max': 100, 'label': 'Percent Trades Never Delinquent'},
-    'MaxDelq2PublicRecLast12M': {'min': 0, 'max': 10, 'label': 'Max Delinquency (Last 12M)'},
-    'MaxDelqEver': {'min': 0, 'max': 10, 'label': 'Max Delinquency Ever'},
-    'NumTotalTrades': {'min': 0, 'max': 200, 'label': 'Total Number of Trades'},
-    'NumTradesOpeninLast12M': {'min': 0, 'max': 20, 'label': 'Trades Opened in Last 12M'},
-    'PercentInstallTrades': {'min': 0, 'max': 100, 'label': 'Percent Installment Trades'},
-    'MSinceMostRecentInqexcl7days': {'min': 0, 'max': 50, 'label': 'Months Since Recent Inquiry'},
-    'NumInqLast6M': {'min': 0, 'max': 100, 'label': 'Number of Inquiries (6M)'},
-    'NumInqLast6Mexcl7days': {'min': 0, 'max': 100, 'label': 'Number of Inquiries (6M, excl. 7d)'},
-    'NetFractionRevolvingBurden': {'min': 0, 'max': 300, 'label': 'Revolving Burden (%)'},
-    'NetFractionInstallBurden': {'min': 0, 'max': 500, 'label': 'Installment Burden (%)'},
-    'NumRevolvingTradesWBalance': {'min': 0, 'max': 50, 'label': 'Revolving Trades w/ Balance'},
-    'NumInstallTradesWBalance': {'min': 0, 'max': 30, 'label': 'Installment Trades w/ Balance'},
-    'NumBank2NatlTradesWHighUtilization': {'min': 0, 'max': 20, 'label': 'High Utilization Trades'},
-    'PercentTradesWBalance': {'min': 0, 'max': 100, 'label': 'Percent Trades w/ Balance'}
+    'ExternalRiskEstimate':              {'min': 0,   'max': 100,  'label': 'External Risk Estimate (High = Better)'},
+    'MSinceOldestTradeOpen':             {'min': 0,   'max': 1000, 'label': 'Months Since Oldest Trade Open'},
+    'MSinceMostRecentTradeOpen':         {'min': -9,  'max': 1000, 'label': 'Months Since Most Recent Trade Open'},
+    'AverageMInFile':                    {'min': 0,   'max': 1000, 'label': 'Average Months in File'},
+    'NumSatisfactoryTrades':             {'min': 0,   'max': 100,  'label': 'Number of Satisfactory Trades'},
+    'NumTrades60Ever2DerogPubRec':       {'min': 0,   'max': 20,   'label': 'Trades 60+ Days Delinquent Ever'},
+    'PercentTradesNeverDelq':            {'min': 0,   'max': 100,  'label': 'Percent Trades Never Delinquent'},
+    'MSinceMostRecentDelq':              {'min': -9,  'max': 1000, 'label': 'Months Since Most Recent Delinquency'},
+    'MaxDelq2PublicRecLast12M':          {'min': 0,   'max': 10,   'label': 'Max Delinquency (Last 12M)'},
+    'MaxDelqEver':                       {'min': 0,   'max': 10,   'label': 'Max Delinquency Ever'},
+    'NumTradesOpeninLast12M':            {'min': -9,  'max': 20,   'label': 'Trades Opened in Last 12M'},
+    'PercentInstallTrades':              {'min': 0,   'max': 100,  'label': 'Percent Installment Trades'},
+    'MSinceMostRecentInqexcl7days':      {'min': -9,  'max': 50,   'label': 'Months Since Most Recent Inquiry'},
+    'NumInqLast6M':                      {'min': 0,   'max': 100,  'label': 'Number of Inquiries (Last 6M)'},
+    'NetFractionRevolvingBurden':        {'min': 0,   'max': 300,  'label': 'Net Fraction Revolving Burden (%)'},
+    'NetFractionInstallBurden':          {'min': 0,   'max': 500,  'label': 'Net Fraction Installment Burden (%)'},
+    'NumRevolvingTradesWBalance':        {'min': 0,   'max': 50,   'label': 'Revolving Trades with Balance'},
+    'NumInstallTradesWBalance':          {'min': 0,   'max': 30,   'label': 'Installment Trades with Balance'},
+    'NumBank2NatlTradesWHighUtilization':{'min': 0,   'max': 20,   'label': 'High Utilization Bank/National Trades'},
+    'PercentTradesWBalance':             {'min': 0,   'max': 100,  'label': 'Percent Trades with Balance'},
 }
+
+# Helper: render a number input; sentinel (-9) features get an inline N/A checkbox
+def render_input(feat):
+    meta = feature_meta[feat]
+    is_sentinel = meta['min'] == -9
+    if is_sentinel:
+        col_label, col_check = st.columns([3, 1])
+        with col_check:
+            na_checked = st.checkbox("N/A", key=f"{feat}_na",
+                                     value=(medians.get(feat, 0) < 0))
+        with col_label:
+            if na_checked:
+                st.number_input(meta['label'], value=-9.0, disabled=True,
+                                key=f"{feat}_disabled")
+                return -9.0
+            else:
+                return st.number_input(
+                    meta['label'],
+                    min_value=0.0,
+                    max_value=float(meta['max']),
+                    value=float(max(medians.get(feat, 0), 0)),
+                    key=f"{feat}_input"
+                )
+    else:
+        return st.number_input(
+            meta['label'],
+            min_value=float(meta['min']),
+            max_value=float(meta['max']),
+            value=float(medians.get(feat, meta['min'])),
+            key=f"{feat}_input"
+        )
 
 # App Layout
 st.title("Simon Bank of Rochester")
@@ -163,47 +199,24 @@ col1, col2 = st.columns([2, 1])
 
 with st.sidebar:
     st.write("Enter the applicant's credit details:")
-    # Group inputs into logical categories
-    with st.expander("Risk & History", expanded=True):
-        for feat in ['ExternalRiskEstimate', 'MSinceOldestTradeOpen', 'AverageMInFile', 'PercentTradesNeverDelq', 'MaxDelqEver']:
-            meta = feature_meta[feat]
-            input_data[feat] = st.number_input(meta['label'], min_value=float(meta['min']), max_value=float(meta['max']), value=float(medians.get(feat, meta['min'])))
 
-    with st.expander("Trades Information"):
-        for feat in ['NumSatisfactoryTrades', 'NumTotalTrades', 'PercentInstallTrades', 'PercentTradesWBalance']:
-            meta = feature_meta[feat]
-            input_data[feat] = st.number_input(meta['label'], min_value=float(meta['min']), max_value=float(meta['max']), value=float(medians.get(feat, meta['min'])))
-
-    with st.expander("Delinquency & Inquiries"):
-        for feat in ['NumTrades60Ever2DerogPubRec', 'NumTrades90Ever2DerogPubRec', 'MaxDelq2PublicRecLast12M', 'MSinceMostRecentInqexcl7days', 'NumInqLast6M']:
-             meta = feature_meta[feat]
-             input_data[feat] = st.number_input(meta['label'], min_value=float(meta['min']), max_value=float(meta['max']), value=float(medians.get(feat, meta['min'])))
-
-    with st.expander("Burden & Utilization"):
-        for feat in ['NetFractionRevolvingBurden', 'NetFractionInstallBurden', 'NumRevolvingTradesWBalance', 'NumInstallTradesWBalance', 'NumBank2NatlTradesWHighUtilization']:
-             meta = feature_meta.get(feat, {'min': 0, 'max': 100, 'label': feat})
-             input_data[feat] = st.number_input(meta['label'], min_value=float(meta['min']), max_value=float(meta['max']), value=float(medians.get(feat, meta['min'])))
-
-    # Handle any missing ones just in case
+    # Render every field in the exact order the model expects
     for feat in feature_names:
-        if feat not in input_data:
-            input_data[feat] = medians.get(feat, 0.0)
+        input_data[feat] = render_input(feat)
 
     predict_btn = st.button("Evaluate Eligibility")
+
+
 
 # Main Content Area
 if predict_btn or 'prediction_done' in st.session_state:
     st.session_state['prediction_done'] = True
     
-    # Prepare input dataframe
+    # Prepare input dataframe (Random Forest is scale-invariant; raw values are correct)
     input_df = pd.DataFrame([input_data])[feature_names]
-    
-    # Scale inputs
-    X_scaled = scaler.transform(input_df)
-    
-    # Make prediction
-    # Probability of being "Bad" (class 1)
-    proba = model.predict_proba(X_scaled)[0, 1]
+
+    # Make prediction — P(Bad) = class index 1
+    proba = model.predict_proba(input_df)[0, 1]
     
     is_denied = proba >= threshold
     
@@ -230,9 +243,9 @@ if predict_btn or 'prediction_done' in st.session_state:
     st.markdown("---")
     col_exp1, col_exp2 = st.columns(2)
     
-    # Calculate SHAP values
+    # Calculate SHAP values (also on raw/unscaled data)
     explainer = get_shap_explainer(model)
-    shap_values = explainer.shap_values(X_scaled)
+    shap_values = explainer.shap_values(input_df)
     
     # Handle SHAP output format
     if isinstance(shap_values, list):
