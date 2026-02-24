@@ -115,6 +115,15 @@ def load_model_artifacts():
     features = joblib.load(os.path.join(base_path, "feature_order.pkl"))
     info = joblib.load(os.path.join(base_path, "preprocessing_info.pkl"))
     config = joblib.load(os.path.join(base_path, "model_config.pkl"))
+
+    # Backwards-compatibility patch: sklearn 1.4+ added `monotonic_cst` to
+    # DecisionTreeClassifier. Models saved with sklearn <=1.3 don't have it in
+    # their pickled __dict__, so _validate_X_predict() raises AttributeError.
+    # Injecting None (the default value) makes the model fully functional.
+    for tree in getattr(model, 'estimators_', []):
+        if not hasattr(tree, 'monotonic_cst'):
+            tree.monotonic_cst = None
+
     return model, scaler, features, info, config
 
 @st.cache_resource
