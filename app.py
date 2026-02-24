@@ -243,54 +243,80 @@ if predict_btn or 'prediction_done' in st.session_state:
     st.markdown("---")
     col_exp1, col_exp2 = st.columns(2)
     
-    # Calculate SHAP values (also on raw/unscaled data)
+    # Calculate SHAP values (raw/unscaled data; check_additivity=False for cross-env stability)
     explainer = get_shap_explainer(model)
-    shap_values = explainer.shap_values(input_df)
-    
-    # Handle SHAP output format
-    if isinstance(shap_values, list):
-        # Class 1 is "Bad"
-        local_shap_bad = shap_values[1][0]
-    else:
-        if len(shap_values.shape) == 3: # (num_samples, num_features, num_classes)
-            local_shap_bad = shap_values[0, :, 1]
-        else:
-            local_shap_bad = shap_values[0][0:len(feature_names)]
+    shap_values = explainer.shap_values(input_df, check_additivity=False)
 
-    # Create explanation dataframe
+    # Extract Bad-class SHAP values — match notebook logic exactly
+    if isinstance(shap_values, list):
+        shap_values_bad = shap_values[1][0]
+    else:
+        shap_values_bad = shap_values[0][:len(feature_names)]
+
+    # Flatten and trim to guaranteed equal length (defensive)
+    shap_values_bad   = np.array(shap_values_bad).flatten()
+    applicant_values  = np.array(input_df.iloc[0].values).flatten()
+    feat_names_arr    = np.array(feature_names)
+    min_len = min(len(feat_names_arr), len(applicant_values), len(shap_values_bad))
+    feat_names_arr   = feat_names_arr[:min_len]
+    applicant_values = applicant_values[:min_len]
+    shap_values_bad  = shap_values_bad[:min_len]
+
+    # Build explanation dataframe sorted by absolute impact
     explanation_df = pd.DataFrame({
-        'Feature': feature_names,
-        'Value': input_df.iloc[0].values,
-        'SHAP_Impact': local_shap_bad
+        'Feature':     feat_names_arr,
+        'Your_Value':  applicant_values,
+        'SHAP_Impact': shap_values_bad
     }).sort_values('SHAP_Impact', key=abs, ascending=False)
 
     with col_exp1:
         st.subheader("Decision Factors (SHAP)")
-        
-        # Take top 10 most impactful features for the plot
+
+        # Top 10 by absolute impact
         top_10 = explanation_df.head(10).copy()
         top_10['Impact_Pct'] = top_10['SHAP_Impact'] * 100
-        # Use full labels from feature_meta
-        top_10['Label'] = top_10.apply(lambda row: f"{feature_meta.get(row['Feature'], {'label': row['Feature']})['label']}", axis=1)
+        # Label = feature name + raw applicant value (matches notebook)
+        top_10['Label'] = top_10.apply(
+            lambda row: f"{row['Feature']}: {row['Your_Value']:.0f}", axis=1
+        )
         top_10 = top_10.sort_values('Impact_Pct', ascending=True)
 
         fig, ax = plt.subplots(figsize=(10, 8))
         fig.patch.set_facecolor('black')
         ax.set_facecolor('#1e1e1e')
-        
-        colors = ['#ff4b4b' if x > 0 else '#00ff00' for x in top_10['Impact_Pct']]
-        ax.barh(range(len(top_10)), top_10['Impact_Pct'], color=colors, alpha=0.8)
-        
+
+        colors = ['#ff4b4b' if x > 0 else '#00c853' for x in top_10['Impact_Pct']]
+        bars = ax.barh(range(len(top_10)), top_10['Impact_Pct'], color=colors, alpha=0.8)
+
         ax.set_yticks(range(len(top_10)))
         ax.set_yticklabels(top_10['Label'], color=ACCENT_GOLD, fontsize=10)
-        ax.set_xlabel('Risk Contribution (%)', color=ACCENT_GOLD, fontsize=12)
-        ax.set_title(f'Risk Impact (Total: {proba:.0%})', color=PRIMARY_YELLOW, fontsize=14, fontweight='bold')
-        
+        ax.set_xlabel('Risk Contribution (%)', color=ACCENT_GOLD, fontsize=12, fontweight='bold')
+        ax.set_title(f'Feature Contributions to {proba:.0%} Default Risk',
+                     color=PRIMARY_YELLOW, fontsize=14, fontweight='bold', pad=20)
+
         for spine in ax.spines.values():
             spine.set_color(ACCENT_GOLD)
         ax.tick_params(colors=ACCENT_GOLD)
-        
         ax.axvline(x=0, color='white', linewidth=1, linestyle='-', alpha=0.3)
+
+        # Percentage labels on bars (matches notebook)
+        for i, (bar, val) in enumerate(zip(bars, top_10['Impact_Pct'])):
+            if abs(val) > 1:
+                label_x = val + (0.15 if val > 0 else -0.15)
+                ax.text(label_x, i, f'{val:+.1f}%',
+                        va='center', ha='left' if val > 0 else 'right',
+                        fontsize=9, fontweight='bold', color=ACCENT_GOLD)
+
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='#ff4b4b', alpha=0.8, label='Increases Risk'),
+            Patch(facecolor='#00c853', alpha=0.8, label='Decreases Risk'),
+        ]
+        ax.legend(handles=legend_elements, loc='lower right', fontsize=10,
+                  facecolor='#1e1e1e', labelcolor=ACCENT_GOLD, edgecolor=ACCENT_GOLD)
+        ax.grid(axis='x', alpha=0.3, linestyle='--', color=ACCENT_GOLD)
+        ax.set_axisbelow(True)
+
         plt.tight_layout()
         st.pyplot(fig)
 
@@ -298,29 +324,28 @@ if predict_btn or 'prediction_done' in st.session_state:
         st.subheader("Improvement Suggestions")
         if is_denied:
             st.write("Focusing on these areas would most effectively lower the predicted risk profile:")
-            
-            # Suggest based on top 3 positive SHAP values (factors that increased risk)
-            positive_impacts = explanation_df[explanation_df['SHAP_Impact'] > 0].head(3)
-            
-            if not positive_impacts.empty:
-                for _, row in positive_impacts.iterrows():
-                    feat = row['Feature']
+
+            # Top 5 factors that increased risk (positive SHAP = more Bad)
+            top_5_denial = explanation_df[explanation_df['SHAP_Impact'] > 0].head(5)
+            if not top_5_denial.empty:
+                for _, row in top_5_denial.iterrows():
+                    feat  = row['Feature']
                     label = feature_meta.get(feat, {'label': feat})['label']
-                    
-                    if 'Burden' in feat or 'Inq' in feat or 'Delq' in feat:
-                        st.info(f"**{label}**: Decreasing this factor would improve eligibility.")
+                    impact_pct = row['SHAP_Impact'] * 100
+                    if 'Burden' in feat or 'Inq' in feat or 'Delq' in feat or 'Derog' in feat:
+                        st.info(f"🔴 **{label}** (+{impact_pct:.1f}%): Reducing this would lower risk.")
                     else:
-                        st.info(f"**{label}**: Increasing this factor would improve eligibility.")
+                        st.info(f"🔴 **{label}** (+{impact_pct:.1f}%): Improving this would lower risk.")
             else:
                 st.info("Improve overall credit health by optimizing the factors shown in the chart.")
         else:
             st.success("The application demonstrates strong credit indicators.")
-            st.write("Key strengths contributing to your approval:")
-            # Show factors with negative SHAP (decreased risk)
-            negative_impacts = explanation_df[explanation_df['SHAP_Impact'] < 0].head(3)
+            st.write("Key strengths contributing to approval:")
+            negative_impacts = explanation_df[explanation_df['SHAP_Impact'] < 0].head(5)
             for _, row in negative_impacts.iterrows():
                 label = feature_meta.get(row['Feature'], {'label': row['Feature']})['label']
-                st.write(f"✓ Strong performance in **{label}**")
+                impact_pct = abs(row['SHAP_Impact'] * 100)
+                st.write(f"🟢 Strong performance in **{label}** (−{impact_pct:.1f}% risk)")
 
 else:
     # Welcome Screen
