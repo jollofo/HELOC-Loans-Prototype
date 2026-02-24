@@ -56,11 +56,11 @@ st.markdown(f"""
     }}
     /* Sidebar styling */
     [data-testid="stSidebar"] {{
-        background-color: {PRIMARY_YELLOW};
-        color: {PRIMARY_NAVY};
+        background-color: {PRIMARY_NAVY};
+        color: white;
     }}
     [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {{
-        color: {PRIMARY_NAVY} !important;
+        color: white !important;
     }}
     [data-testid="stSidebar"] summary {{
         background-color: {SOFT_BUTTER};
@@ -120,9 +120,17 @@ def load_model_artifacts():
     # DecisionTreeClassifier. Models saved with sklearn <=1.3 don't have it in
     # their pickled __dict__, so _validate_X_predict() raises AttributeError.
     # Injecting None (the default value) makes the model fully functional.
+    #
+    # Also fix: sklearn 1.3 saved individual tree classes_ as float64 (e.g.
+    # [0., 1.]) while the RF stores them as int64 ([0, 1]). The dtype mismatch
+    # in sklearn 1.6 causes predict_proba to skip normalisation and return raw
+    # leaf counts instead of probabilities. Casting to int fixes this cleanly.
     for tree in getattr(model, 'estimators_', []):
         if not hasattr(tree, 'monotonic_cst'):
             tree.monotonic_cst = None
+        if hasattr(tree, 'classes_') and tree.classes_.dtype != model.classes_.dtype:
+            import numpy as _np
+            tree.classes_ = tree.classes_.astype(model.classes_.dtype)
 
     return model, scaler, features, info, config
 
@@ -226,7 +234,14 @@ if predict_btn or 'prediction_done' in st.session_state:
     input_df = pd.DataFrame([input_data])[feature_names]
 
     # Make prediction — P(Bad) = class index 1
-    proba = model.predict_proba(input_df)[0, 1]
+    raw_proba = model.predict_proba(input_df)
+    # Sklearn ≥1.4 / version-mismatch guard: individual trees may store float64
+    # classes_ while the RF stores int64, causing predict_proba to return raw
+    # vote counts instead of normalised probabilities. Normalise defensively.
+    row_sum = raw_proba[0].sum()
+    if row_sum > 1.0 + 1e-6:
+        raw_proba = raw_proba / raw_proba.sum(axis=1, keepdims=True)
+    proba = raw_proba[0, 1]
     
     is_denied = proba >= threshold
     
