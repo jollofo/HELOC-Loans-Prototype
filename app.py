@@ -119,7 +119,8 @@ def load_model_artifacts():
 
 @st.cache_resource
 def get_shap_explainer(_model):
-    return shap.TreeExplainer(_model)
+    # 'interventional' avoids C-level heap corruption seen on SHAP 0.46+ / Python 3.13
+    return shap.TreeExplainer(_model, feature_perturbation='interventional')
 
 try:
     model, scaler, feature_names, info, config = load_model_artifacts()
@@ -243,15 +244,24 @@ if predict_btn or 'prediction_done' in st.session_state:
     st.markdown("---")
     col_exp1, col_exp2 = st.columns(2)
     
-    # Calculate SHAP values (raw/unscaled data; check_additivity=False for cross-env stability)
+    # Calculate SHAP values — pass numpy array to avoid C-ext issues with DataFrames
     explainer = get_shap_explainer(model)
-    shap_values = explainer.shap_values(input_df, check_additivity=False)
+    X_shap = input_df.values  # shape (1, n_features)
+    shap_values = explainer.shap_values(X_shap, check_additivity=False)
 
-    # Extract Bad-class SHAP values — match notebook logic exactly
+    # Handle all output shapes SHAP may return across versions:
+    #   list  → [class_0_arr, class_1_arr], each (n_samples, n_features)
+    #   3D arr → (n_samples, n_features, n_classes)
+    #   2D arr → (n_samples, n_features)  [binary shorthand]
     if isinstance(shap_values, list):
-        shap_values_bad = shap_values[1][0]
+        # Classic format — index 1 = Bad class
+        shap_values_bad = np.array(shap_values[1][0]).flatten()
     else:
-        shap_values_bad = shap_values[0][:len(feature_names)]
+        sv = np.array(shap_values)
+        if sv.ndim == 3:          # (n_samples, n_features, n_classes)
+            shap_values_bad = sv[0, :, 1].flatten()
+        else:                      # (n_samples, n_features)
+            shap_values_bad = sv[0].flatten()
 
     # Flatten and trim to guaranteed equal length (defensive)
     shap_values_bad   = np.array(shap_values_bad).flatten()
