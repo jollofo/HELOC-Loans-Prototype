@@ -31,13 +31,16 @@ st.markdown(f"""
         background-color: #ffffff;
     }}
     .stApp {{
-        background-color: black;
-        color: {ACCENT_GOLD};
+        background-color: white;
+        color: {PRIMARY_NAVY};
     }}
     /* Header styling */
     h1, h2, h3 {{
-        color: {PRIMARY_YELLOW} !important;
+        color: {PRIMARY_NAVY} !important;
         font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    }}
+    p {{
+        color: {PRIMARY_NAVY} !important;
     }}
     /* Button styling */
     .stButton>button {{
@@ -51,7 +54,7 @@ st.markdown(f"""
         transition: all 0.3s ease;
     }}
     .stButton>button:hover {{
-        background-color: {SOFT_BUTTER};
+        background-color: {ACCENT_BLUE};
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }}
     /* Sidebar styling */
@@ -74,17 +77,17 @@ st.markdown(f"""
         box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }}
     .positive {{
-        background-color: {SOFT_SKY};
+        background-color: lightgreen;
         color: {PRIMARY_NAVY};
-        border-left: 10px solid {ACCENT_BLUE};
+        border-left: 10px solid green;
         h2 {{
             color: {PRIMARY_NAVY} !important;
         }}
     }}
     .negative {{
-        background-color: {SOFT_BUTTER};
+        background-color: pink;
         color: #7d6608;
-        border-left: 10px solid {ACCENT_GOLD};
+        border-left: 10px solid red;
         h2 {{
             color: {PRIMARY_NAVY} !important;
         }}
