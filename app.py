@@ -327,7 +327,7 @@ if predict_btn or 'prediction_done' in st.session_state:
 
         ax.set_yticks(range(len(top_10)))
         ax.set_yticklabels(top_10['Label'], color=ACCENT_GOLD, fontsize=10)
-        ax.set_xlabel('Risk Contribution (%)', color=ACCENT_GOLD, fontsize=12, fontweight='bold')
+        ax.set_xlabel('Risk Contribution (%-pts)', color=ACCENT_GOLD, fontsize=12, fontweight='bold')
         ax.set_title(f'Feature Contributions to {proba:.0%} Default Risk',
                      color=PRIMARY_YELLOW, fontsize=14, fontweight='bold', pad=20)
 
@@ -340,7 +340,7 @@ if predict_btn or 'prediction_done' in st.session_state:
         for i, (bar, val) in enumerate(zip(bars, top_10['Impact_Pct'])):
             if abs(val) > 1:
                 label_x = val + (0.15 if val > 0 else -0.15)
-                ax.text(label_x, i, f'{val:+.1f}%',
+                ax.text(label_x, i, f'{val:+.1f}pts',
                         va='center', ha='left' if val > 0 else 'right',
                         fontsize=9, fontweight='bold', color=ACCENT_GOLD)
 
@@ -370,9 +370,9 @@ if predict_btn or 'prediction_done' in st.session_state:
                     label = feature_meta.get(feat, {'label': feat})['label']
                     impact_pct = row['SHAP_Impact'] * 100
                     if 'Burden' in feat or 'Inq' in feat or 'Delq' in feat or 'Derog' in feat:
-                        st.info(f"🔴 **{label}** (+{impact_pct:.1f}%): Reducing this would lower risk.")
+                        st.info(f"🔴 **{label}** (+{impact_pct:.1f}pts): Reducing this would lower risk.")
                     else:
-                        st.info(f"🔴 **{label}** (+{impact_pct:.1f}%): Improving this would lower risk.")
+                        st.info(f"🔴 **{label}** (+{impact_pct:.1f}pts): Improving this would lower risk.")
             else:
                 st.info("Improve overall credit health by optimizing the factors shown in the chart.")
         else:
@@ -382,7 +382,7 @@ if predict_btn or 'prediction_done' in st.session_state:
             for _, row in negative_impacts.iterrows():
                 label = feature_meta.get(row['Feature'], {'label': row['Feature']})['label']
                 impact_pct = abs(row['SHAP_Impact'] * 100)
-                st.write(f"🟢 Strong performance in **{label}** (−{impact_pct:.1f}% risk)")
+                st.write(f"🟢 Strong performance in **{label}** (−{impact_pct:.1f}pts risk)")
 
 else:
     # Welcome Screen
